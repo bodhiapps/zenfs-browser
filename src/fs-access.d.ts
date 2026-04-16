@@ -1,0 +1,18 @@
+interface FileSystemHandlePermissionDescriptor {
+  mode?: "read" | "readwrite";
+}
+
+interface FileSystemHandle {
+  requestPermission(
+    descriptor?: FileSystemHandlePermissionDescriptor,
+  ): Promise<PermissionState>;
+  queryPermission(
+    descriptor?: FileSystemHandlePermissionDescriptor,
+  ): Promise<PermissionState>;
+}
+
+interface Window {
+  showDirectoryPicker(
+    options?: { mode?: "read" | "readwrite" },
+  ): Promise<FileSystemDirectoryHandle>;
+}
