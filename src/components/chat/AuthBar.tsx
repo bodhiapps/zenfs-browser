@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+import { Settings } from "lucide-react";
 import { useBodhi, LoginOptionsBuilder } from "@bodhiapp/bodhi-js-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -14,7 +16,20 @@ export default function AuthBar() {
     login,
     logout,
     showSetup,
+    clientState,
   } = useBodhi();
+
+  const prevServerUrlRef = useRef<string | null>(clientState.url);
+
+  useEffect(() => {
+    const prev = prevServerUrlRef.current;
+    const next = clientState.url;
+    prevServerUrlRef.current = next;
+    if (prev && next && prev !== next) {
+      void logout();
+      toast.info("Server changed — signed out. Please log in again.");
+    }
+  }, [clientState.url, logout]);
 
   const handleLogin = async () => {
     const loginOptions = new LoginOptionsBuilder()
@@ -84,6 +99,18 @@ export default function AuthBar() {
           </Button>
         )}
       </section>
+      {isOverallReady && (
+        <Button
+          data-testid="btn-open-settings"
+          onClick={showSetup}
+          variant="ghost"
+          size="icon"
+          title="Change server / settings"
+          aria-label="Settings"
+        >
+          <Settings className="size-4" />
+        </Button>
+      )}
     </div>
   );
 }
