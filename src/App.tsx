@@ -2,8 +2,8 @@ import { Fragment } from "react";
 import { BodhiProvider } from "@bodhiapp/bodhi-js-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { FileViewer } from "@/components/FileViewer";
-import AuthBar from "@/components/chat/AuthBar";
-import ChatColumn from "@/components/chat/ChatColumn";
+import AuthBar from "@/chat-ui/components/AuthBar";
+import ChatColumn from "@/chat-ui/components/ChatColumn";
 import {
   Breadcrumb,
   BreadcrumbItem,
