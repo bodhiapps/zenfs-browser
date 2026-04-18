@@ -31,7 +31,8 @@ import { cn } from "@/lib/utils";
 import type { FileNode } from "@/hooks/useFileTree";
 import { sanitizePath } from "@/hooks/useFileTree";
 
-interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
+interface AppSidebarProps
+  extends Omit<React.ComponentProps<typeof Sidebar>, "onSelect" | "onToggle"> {
   status: "empty" | "prompt" | "ready";
   dirName: string | null;
   nodes: FileNode[];

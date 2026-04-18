@@ -1,6 +1,9 @@
 import { Fragment } from "react";
+import { BodhiProvider } from "@bodhiapp/bodhi-js-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { FileViewer } from "@/components/FileViewer";
+import AuthBar from "@/components/chat/AuthBar";
+import ChatColumn from "@/components/chat/ChatColumn";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -14,10 +17,14 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { Toaster } from "@/components/ui/sonner";
 import { useDirectoryHandle } from "@/hooks/useDirectoryHandle";
 import { useFileTree } from "@/hooks/useFileTree";
+import { AUTH_CLIENT_ID, AUTH_SERVER_URL } from "@/env";
 
-function App() {
+const BASE_PATH = import.meta.env.BASE_URL;
+
+function AppContent() {
   const {
     status,
     handle,
@@ -101,16 +108,37 @@ function App() {
               </Breadcrumb>
             </>
           )}
+          <div className="ml-auto">
+            <AuthBar />
+          </div>
         </header>
-        <FileViewer
-          viewerState={viewerState}
-          selectedNode={selectedNode}
-          fileContent={fileContent}
-          saveState={saveState}
-          onSave={saveFile}
-        />
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <FileViewer
+            viewerState={viewerState}
+            selectedNode={selectedNode}
+            fileContent={fileContent}
+            saveState={saveState}
+            onSave={saveFile}
+          />
+          <ChatColumn className="w-[380px] shrink-0 border-l" />
+        </div>
       </SidebarInset>
     </SidebarProvider>
+  );
+}
+
+function App() {
+  return (
+    <BodhiProvider
+      authClientId={AUTH_CLIENT_ID}
+      clientConfig={{
+        ...(AUTH_SERVER_URL && { authServerUrl: AUTH_SERVER_URL }),
+      }}
+      basePath={BASE_PATH}
+    >
+      <AppContent />
+      <Toaster />
+    </BodhiProvider>
   );
 }
 
