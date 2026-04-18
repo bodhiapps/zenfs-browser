@@ -29,6 +29,7 @@ import type { FileSystemProvider } from "@/agent-kit/tools/fs-provider";
 import type { ChatStore } from "@/agent-kit/persistence/chat-store";
 import { createFsTools } from "@/agent-kit/tools/registry";
 import { buildSystemPrompt } from "@/agent-kit/agent/prompt";
+import { resolveMentions } from "@/agent-kit/mentions/resolver";
 import { registerBuiltInRenderers } from "@/chat-ui/components/tool-renderers";
 import type { ChatUiActions, ChatUiState } from "@/chat-ui/contracts/ui-session";
 
@@ -318,8 +319,22 @@ export function useAgentSession(
     agent.state.systemPrompt = buildSystemPrompt({
       rootDirName: p.fsProvider?.name ?? null,
     });
+    // Resolve @path mentions into fenced code blocks appended to the user
+    // message. The resolved text goes into both the LLM turn context AND the
+    // UI bubble / persistence — a single-source-of-truth choice documented
+    // in the Phase 5 review notes. If no fsProvider or no mentions, the
+    // resolver returns the original string unchanged.
+    let resolved = prompt;
+    if (p.fsProvider) {
+      try {
+        resolved = await resolveMentions(p.fsProvider, prompt);
+      } catch (err) {
+        console.error("Failed to resolve @-mentions:", err);
+        resolved = prompt;
+      }
+    }
     try {
-      await agent.prompt(prompt);
+      await agent.prompt(resolved);
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return;
       const message = err instanceof Error ? err.message : String(err);

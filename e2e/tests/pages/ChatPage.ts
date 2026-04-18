@@ -119,4 +119,37 @@ export class ChatPage {
       .locator(`[data-testid="div-tool-result-${toolName}"]`)
       .locator('[data-testid="div-tool-result-content"]');
   }
+
+  // --- @-file-mention helpers (Phase 5+) ---
+
+  /** Sanitize a vault path into the testid suffix used by mention buttons. */
+  static sanitizeMentionPath(path: string): string {
+    return path.replace(/[/.]/g, "-");
+  }
+
+  mentionPopup(state?: "visible" | "filtering" | "empty") {
+    const base = '[data-testid="div-file-mention-popup"]';
+    return this.page.locator(
+      state ? `${base}[data-test-state="${state}"]` : base,
+    );
+  }
+
+  mentionOption(path: string) {
+    return this.page.locator(
+      `[data-testid="btn-mention-option-${ChatPage.sanitizeMentionPath(path)}"]`,
+    );
+  }
+
+  /** Type `@<query>` into the chat input and wait for the popup. */
+  async typeMention(query: string): Promise<void> {
+    const input = this.page.locator(this.selectors.chatInput);
+    await input.focus();
+    await input.type(`@${query}`);
+    await this.mentionPopup("visible").or(this.mentionPopup("filtering")).waitFor();
+  }
+
+  /** Click a mention option by path. */
+  async pickMentionByPath(path: string): Promise<void> {
+    await this.mentionOption(path).click();
+  }
 }

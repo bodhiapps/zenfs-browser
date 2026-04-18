@@ -198,6 +198,7 @@ export default function ChatColumn({
             models={models}
             isLoadingModels={isLoadingModels}
             onRefreshModels={loadModels}
+            fsProvider={fsProvider}
           />
         </>
       )}
