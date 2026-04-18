@@ -131,20 +131,46 @@ export async function installFsMock(page: Page): Promise<void> {
         queryPermission: async () => "granted",
         requestPermission: async () => "granted",
         resolve: async () => null,
-        getDirectoryHandle: async (name: string) => {
-          const child = vdir.children[name];
+        getDirectoryHandle: async (
+          name: string,
+          options?: { create?: boolean },
+        ) => {
+          let child = vdir.children[name];
+          if (!child && options?.create) {
+            child = {
+              kind: "directory",
+              name,
+              children: {},
+            };
+            vdir.children[name] = child;
+          }
           if (!child || child.kind !== "directory")
             throw new DOMException("Not found", "NotFoundError");
           return createDirHandle(child);
         },
-        getFileHandle: async (name: string) => {
-          const child = vdir.children[name];
+        getFileHandle: async (
+          name: string,
+          options?: { create?: boolean },
+        ) => {
+          let child = vdir.children[name];
+          if (!child && options?.create) {
+            child = {
+              kind: "file",
+              name,
+              content: "",
+              type: "text/plain",
+            };
+            vdir.children[name] = child;
+          }
           if (!child || child.kind !== "file")
             throw new DOMException("Not found", "NotFoundError");
           return createFileHandle(child);
         },
-        removeEntry: async () => {
-          throw new DOMException("Not allowed", "NotAllowedError");
+        removeEntry: async (name: string) => {
+          if (!(name in vdir.children)) {
+            throw new DOMException("Not found", "NotFoundError");
+          }
+          delete vdir.children[name];
         },
         entries: () => {
           let idx = 0;

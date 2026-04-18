@@ -56,3 +56,26 @@ Append-only log. One short section per phase; final audit happens in Phase 6.
   - TypeBox peer dep: `@sinclair/typebox@0.34.49` matched pi-ai's version; added as direct dep.
   - `Model` type lives in `@mariozechner/pi-ai`, not `@mariozechner/pi-agent-core`.
   - `toolResult` message shape: top-level `toolName` and `toolCallId`, not a content-part — flagged by the first failed run where bubble rendered as `div-tool-result-unknown`.
+
+## Phase 3 — fs__write, fs__ls, fs__edit tools
+
+- New tool modules (all in `src/agent-kit/tools/`, each <=110 lines):
+  - `write.ts` — `fs__write(path, content)`. Creates parent dirs via `FileSystemProvider.mkdir` (already recursive). Dropped the karpathy `onWrite` callback (no search index in M1). Overwrites existing files. Reports `bytesWritten` (UTF-8).
+  - `ls.ts` — `fs__ls(path?, limit?, recursive?)`. Non-recursive path unchanged from karpathy shape (entries sorted, trailing `/` on dirs). Recursive path: BFS queue with `RECURSIVE_DEPTH_CAP=4` and `RECURSIVE_ENTRY_CAP=500`; recursive entries are emitted as relative paths (e.g. `docs/guide.md`, `src/`).
+  - `edit.ts` — NEW. Schema `{path, startLine, endLine, content}`, 1-indexed inclusive range. `endLine = startLine - 1` signals insert-without-replace. Read → split('\n') → splice → writeFile. Error surface: not-found, is-directory, range out-of-bounds (both ends), aborted.
+- `tools/registry.ts` — `createFsTools(fs)` now returns all four tools. Flat list, one factory per tool; no implicit coupling.
+- `tools/index.ts` — barrel re-exports `createWriteTool`, `createLsTool`, `createEditTool`; `agent-kit/index.ts` re-exports via its existing `export * from "./tools"`.
+- `agent/prompt.ts` — system prompt rewritten to describe all four tools + rules:
+  - paths resolve under `/vault` (absolute or relative);
+  - run `fs__ls` before `fs__write` to a new directory;
+  - run `fs__read` before `fs__edit` so line numbers are correct;
+  - don't re-read `@`-mentioned files (contents pre-inlined);
+  - report tool errors verbatim. Prompt sits around ~1.1k chars, well under the 1500 guardrail.
+- No new tool renderers needed — the `DefaultToolRenderer` fallback is registered via `getToolRenderer()` and renders `div-tool-result-content` for unknown tool names. Decision: keeping renderers minimal honors the "tiny renderer" direction of the plan and the registry's fallback behavior. `FsWriteRenderer`/`FsLsRenderer`/`FsEditRenderer` can be added later without breaking existing tests.
+- Test surface enrichment (mock, not app): `e2e/helpers/fs-mock.ts` now honors `{create: true}` on both `getFileHandle` and `getDirectoryHandle` (previously threw `NotFoundError` unconditionally); `removeEntry` now actually deletes the child instead of throwing. Required for ZenFS WebAccess to write new files / create parent dirs. No app code changed.
+- New e2e journey `e2e/agent-fs-mutation.spec.ts` — one test, 10 steps, 5+ assertions across the journey: write notes.md → assert virtual file contains `# My Notes` → fs__ls → assert entries include both `README.md` and `notes.md` → fs__edit line 1 → assert virtual file contains `Updated notes`. Each tool-call terminal state is gated on `div-tool-result-<name>[data-test-state="success"]`. Per-tool result content asserted via the existing `div-tool-result-content` selector. `readVirtualFile` used for file-content verification since the file-tree has no refresh UI yet; per the plan this is explicit precedent for secondary verification.
+- Architectural invariants confirmed:
+  - `agent-kit/tools/*` imports only `@mariozechner/pi-agent-core`, `@sinclair/typebox`, and sibling files — no React/ZenFS/dexie/@bodhiapp.
+  - `registry.ts` is the only file that imports all four tool factories; tools themselves do not import each other.
+  - `prompt.ts` unchanged in imports (zero deps).
+- Gates: `npm run build` clean, `npm run lint` clean, `npm run ci:test:e2e` 5/5 passing (~48s).
