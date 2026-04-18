@@ -34,8 +34,10 @@ function App() {
     selectedNode,
     fileContent,
     viewerState,
+    saveState,
     toggleExpand,
     selectFile,
+    saveFile,
   } = useFileTree(handle);
 
   if (restoring) {
@@ -104,6 +106,8 @@ function App() {
           viewerState={viewerState}
           selectedNode={selectedNode}
           fileContent={fileContent}
+          saveState={saveState}
+          onSave={saveFile}
         />
       </SidebarInset>
     </SidebarProvider>

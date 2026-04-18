@@ -3,6 +3,9 @@ import type { Page } from "@playwright/test";
 /**
  * Injects a mock File System Access API into the page before it loads.
  * Must be called before page.goto().
+ *
+ * Also exposes window.__fsMockRead(path) in the page so tests can read back
+ * the (possibly-written) content of a virtual file.
  */
 export async function installFsMock(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -62,6 +65,20 @@ export async function installFsMock(page: Page): Promise<void> {
       },
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function resolvePath(path: string): any {
+      if (!path) return root;
+      const parts = path.split("/");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let node: any = root;
+      for (const p of parts) {
+        if (!node?.children?.[p]) return null;
+        node = node.children[p];
+      }
+      return node;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     function createFileHandle(vfile: any): any {
       return {
         kind: "file",
@@ -72,13 +89,40 @@ export async function installFsMock(page: Page): Promise<void> {
         getFile: async () =>
           new File([vfile.content], vfile.name, { type: vfile.type }),
         createWritable: async () => {
-          throw new DOMException("Not allowed", "NotAllowedError");
+          const chunks: string[] = [];
+          return {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            write: async (data: any) => {
+              if (typeof data === "string") {
+                chunks.push(data);
+              } else if (data instanceof Blob) {
+                chunks.push(await data.text());
+              } else if (data?.data !== undefined) {
+                // WriteParams-like {type:'write', data}
+                const d = data.data;
+                chunks.push(
+                  typeof d === "string"
+                    ? d
+                    : d instanceof Blob
+                      ? await d.text()
+                      : String(d),
+                );
+              } else {
+                chunks.push(String(data));
+              }
+            },
+            close: async () => {
+              vfile.content = chunks.join("");
+            },
+            abort: async () => {},
+          };
         },
       };
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     function createDirHandle(vdir: any): any {
-      const childEntries = Object.entries(vdir.children);
+      const getChildEntries = () => Object.entries(vdir.children);
 
       return {
         kind: "directory",
@@ -104,6 +148,7 @@ export async function installFsMock(page: Page): Promise<void> {
         },
         entries: () => {
           let idx = 0;
+          const childEntries = getChildEntries();
           return {
             [Symbol.asyncIterator]() {
               return this;
@@ -112,6 +157,7 @@ export async function installFsMock(page: Page): Promise<void> {
               if (idx >= childEntries.length) {
                 return { done: true, value: undefined };
               }
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const [name, child] = childEntries[idx++] as [string, any];
               const childHandle =
                 child.kind === "file"
@@ -137,6 +183,7 @@ export async function installFsMock(page: Page): Promise<void> {
         },
         values: () => {
           let idx = 0;
+          const childEntries = getChildEntries();
           return {
             [Symbol.asyncIterator]() {
               return this;
@@ -144,6 +191,7 @@ export async function installFsMock(page: Page): Promise<void> {
             async next() {
               if (idx >= childEntries.length)
                 return { done: true, value: undefined };
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const [, child] = childEntries[idx++] as [string, any];
               const childHandle =
                 child.kind === "file"
@@ -160,6 +208,17 @@ export async function installFsMock(page: Page): Promise<void> {
 
     Object.defineProperty(window, "showDirectoryPicker", {
       value: async () => mockRoot,
+      writable: true,
+      configurable: true,
+    });
+
+    // Test hook: read current virtual file content
+    Object.defineProperty(window, "__fsMockRead", {
+      value: (path: string) => {
+        const node = resolvePath(path);
+        if (!node || node.kind !== "file") return null;
+        return node.content;
+      },
       writable: true,
       configurable: true,
     });

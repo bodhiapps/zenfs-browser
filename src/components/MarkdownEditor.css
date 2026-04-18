@@ -1,0 +1,10 @@
+[data-testid="div-markdown-editor"] .milkdown {
+  height: 100%;
+  min-height: 100%;
+}
+
+[data-testid="div-markdown-editor"] .milkdown .ProseMirror {
+  min-height: 100%;
+  padding: 1.5rem 2rem;
+  outline: none;
+}

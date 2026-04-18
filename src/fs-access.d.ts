@@ -11,6 +11,19 @@ interface FileSystemHandle {
   ): Promise<PermissionState>;
 }
 
+interface FileSystemWritableFileStream extends WritableStream {
+  write(data: BufferSource | Blob | string): Promise<void>;
+  seek(position: number): Promise<void>;
+  truncate(size: number): Promise<void>;
+  close(): Promise<void>;
+}
+
+interface FileSystemFileHandle {
+  createWritable(
+    options?: { keepExistingData?: boolean },
+  ): Promise<FileSystemWritableFileStream>;
+}
+
 interface Window {
   showDirectoryPicker(
     options?: { mode?: "read" | "readwrite" },

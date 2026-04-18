@@ -21,7 +21,7 @@ export function useDirectoryHandle() {
           setRestoring(false);
           return;
         }
-        const perm = await stored.requestPermission({ mode: "read" });
+        const perm = await stored.requestPermission({ mode: "readwrite" });
         if (cancelled) return;
         if (perm === "granted") {
           setState({ status: "ready", handle: stored });
@@ -40,7 +40,7 @@ export function useDirectoryHandle() {
   }, []);
 
   const openDirectory = useCallback(async () => {
-    const handle = await window.showDirectoryPicker({ mode: "read" });
+    const handle = await window.showDirectoryPicker({ mode: "readwrite" });
     try {
       await set(IDB_KEY, handle);
     } catch {
@@ -51,7 +51,7 @@ export function useDirectoryHandle() {
 
   const restoreAccess = useCallback(async () => {
     if (state.status !== "prompt") return;
-    const perm = await state.handle.requestPermission({ mode: "read" });
+    const perm = await state.handle.requestPermission({ mode: "readwrite" });
     if (perm === "granted") {
       setState({ status: "ready", handle: state.handle });
     }

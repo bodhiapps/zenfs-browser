@@ -1,17 +1,22 @@
 import { IconFileText, IconFileAlert, IconClick } from "@tabler/icons-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { FileNode } from "@/hooks/useFileTree";
+import { MarkdownEditor } from "@/components/MarkdownEditor";
+import type { FileNode, SaveState, ViewerState } from "@/hooks/useFileTree";
 
 interface FileViewerProps {
-  viewerState: "empty" | "loading" | "loaded" | "unsupported";
+  viewerState: ViewerState;
   selectedNode: FileNode | null;
   fileContent: string | null;
+  saveState: SaveState;
+  onSave: (content: string) => Promise<void>;
 }
 
 export function FileViewer({
   viewerState,
   selectedNode,
   fileContent,
+  saveState,
+  onSave,
 }: FileViewerProps) {
   return (
     <div
@@ -41,6 +46,15 @@ export function FileViewer({
             <code>{fileContent}</code>
           </pre>
         </ScrollArea>
+      )}
+
+      {viewerState === "editor" && fileContent !== null && selectedNode && (
+        <MarkdownEditor
+          key={selectedNode.path}
+          initialContent={fileContent}
+          onSave={onSave}
+          saveState={saveState}
+        />
       )}
 
       {viewerState === "unsupported" && (

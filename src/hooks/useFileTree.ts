@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 export interface FileNode {
   name: string;
@@ -22,6 +22,8 @@ const TEXT_EXTENSIONS = new Set([
   ".lock", ".log",
 ]);
 
+const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown", ".mdx"]);
+
 const EXTENSIONLESS_TEXT_FILES = new Set([
   "Makefile", "Dockerfile", "Containerfile", "Procfile",
   "LICENSE", "LICENCE", "README", "CHANGELOG",
@@ -34,6 +36,12 @@ export function isTextFile(name: string): boolean {
   const dotIdx = name.lastIndexOf(".");
   if (dotIdx === -1) return false;
   return TEXT_EXTENSIONS.has(name.slice(dotIdx).toLowerCase());
+}
+
+export function isMarkdownFile(name: string): boolean {
+  const dotIdx = name.lastIndexOf(".");
+  if (dotIdx === -1) return false;
+  return MARKDOWN_EXTENSIONS.has(name.slice(dotIdx).toLowerCase());
 }
 
 export function sanitizePath(path: string): string {
@@ -65,13 +73,23 @@ function sortNodes(nodes: FileNode[]): FileNode[] {
   });
 }
 
+export type ViewerState =
+  | "empty"
+  | "loading"
+  | "loaded"
+  | "editor"
+  | "unsupported";
+
+export type SaveState = "idle" | "saving" | "saved" | "error";
+
 interface TreeState {
   nodes: FileNode[];
   expanded: Set<string>;
   selectedPath: string | null;
   selectedNode: FileNode | null;
   fileContent: string | null;
-  viewerState: "empty" | "loading" | "loaded" | "unsupported";
+  viewerState: ViewerState;
+  saveState: SaveState;
 }
 
 const EMPTY_SET = new Set<string>();
@@ -83,10 +101,16 @@ const EMPTY_STATE: TreeState = {
   selectedNode: null,
   fileContent: null,
   viewerState: "empty",
+  saveState: "idle",
 };
 
 export function useFileTree(handle: FileSystemDirectoryHandle | null) {
   const [state, setState] = useState<TreeState>(EMPTY_STATE);
+  const selectedNodeRef = useRef<FileNode | null>(null);
+
+  useEffect(() => {
+    selectedNodeRef.current = state.selectedNode;
+  }, [state.selectedNode]);
 
   useEffect(() => {
     if (!handle) return;
@@ -143,6 +167,7 @@ export function useFileTree(handle: FileSystemDirectoryHandle | null) {
         selectedNode: node,
         viewerState: "empty",
         fileContent: null,
+        saveState: "idle",
       }));
       return;
     }
@@ -154,6 +179,7 @@ export function useFileTree(handle: FileSystemDirectoryHandle | null) {
         selectedNode: node,
         viewerState: "unsupported",
         fileContent: null,
+        saveState: "idle",
       }));
       return;
     }
@@ -164,15 +190,19 @@ export function useFileTree(handle: FileSystemDirectoryHandle | null) {
       selectedNode: node,
       viewerState: "loading",
       fileContent: null,
+      saveState: "idle",
     }));
 
     try {
       const file = await (node.handle as FileSystemFileHandle).getFile();
       const text = await file.text();
+      const nextViewerState: ViewerState = isMarkdownFile(node.name)
+        ? "editor"
+        : "loaded";
       setState((prev) => ({
         ...prev,
         fileContent: text,
-        viewerState: "loaded",
+        viewerState: nextViewerState,
       }));
     } catch {
       setState((prev) => ({
@@ -183,12 +213,35 @@ export function useFileTree(handle: FileSystemDirectoryHandle | null) {
     }
   }, []);
 
-  // When handle is null, return empty state directly
+  const saveFile = useCallback(async (content: string) => {
+    const node = selectedNodeRef.current;
+    if (!node || node.kind !== "file") return;
+    const fileHandle = node.handle as FileSystemFileHandle;
+    setState((prev) => ({ ...prev, saveState: "saving" }));
+    try {
+      const writable = await fileHandle.createWritable();
+      await writable.write(content);
+      await writable.close();
+      setState((prev) =>
+        prev.selectedNode?.path === node.path
+          ? { ...prev, saveState: "saved" }
+          : prev,
+      );
+    } catch {
+      setState((prev) =>
+        prev.selectedNode?.path === node.path
+          ? { ...prev, saveState: "error" }
+          : prev,
+      );
+    }
+  }, []);
+
   if (!handle) {
     return {
       ...EMPTY_STATE,
       toggleExpand,
       selectFile,
+      saveFile,
     };
   }
 
@@ -199,8 +252,10 @@ export function useFileTree(handle: FileSystemDirectoryHandle | null) {
     selectedNode: state.selectedNode,
     fileContent: state.fileContent,
     viewerState: state.viewerState,
+    saveState: state.saveState,
     toggleExpand,
     selectFile,
+    saveFile,
   };
 }
 

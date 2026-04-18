@@ -22,6 +22,8 @@ export class FileBrowserPage {
     viewerContainer: '[data-testid="div-viewer-container"]',
     viewerLoaded:
       '[data-testid="div-viewer-container"][data-test-state="loaded"]',
+    viewerEditor:
+      '[data-testid="div-viewer-container"][data-test-state="editor"]',
     viewerEmpty:
       '[data-testid="div-viewer-container"][data-test-state="empty"]',
     viewerUnsupported:
@@ -29,6 +31,9 @@ export class FileBrowserPage {
     viewerContent: '[data-testid="pre-viewer-content"]',
     breadcrumb: '[data-testid="nav-viewer-breadcrumb"]',
     unsupportedMsg: '[data-testid="p-viewer-unsupported"]',
+    markdownEditor: '[data-testid="div-markdown-editor"]',
+    markdownEditable: '[data-testid="div-markdown-editor"] .ProseMirror',
+    saveState: '[data-testid="span-save-state"]',
   };
 
   constructor(page: Page) {
@@ -77,9 +82,30 @@ export class FileBrowserPage {
     await this.treeNode(sanitizedPath).click();
     await this.page
       .locator(
-        `${this.selectors.viewerLoaded}, ${this.selectors.viewerUnsupported}`,
+        `${this.selectors.viewerLoaded}, ${this.selectors.viewerEditor}, ${this.selectors.viewerUnsupported}`,
       )
       .waitFor();
+  }
+
+  get markdownEditor(): Locator {
+    return this.page.locator(this.selectors.markdownEditor);
+  }
+
+  get markdownEditable(): Locator {
+    return this.page.locator(this.selectors.markdownEditable);
+  }
+
+  get saveState(): Locator {
+    return this.page.locator(this.selectors.saveState);
+  }
+
+  async readVirtualFile(path: string): Promise<string | null> {
+    return await this.page.evaluate(
+      (p) =>
+        (window as unknown as { __fsMockRead?: (p: string) => string | null })
+          .__fsMockRead?.(p) ?? null,
+      path,
+    );
   }
 
   async getViewerState(): Promise<string> {
