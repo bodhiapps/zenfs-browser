@@ -16,7 +16,7 @@
  * stays Fuse-free.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Fuse from "fuse.js";
 import type { FileSystemProvider } from "@/agent-kit/tools/fs-provider";
 
@@ -84,74 +84,52 @@ export function useFileMentions(
   fsProvider: FileSystemProvider | null,
 ): UseFileMentionsResult {
   const [files, setFiles] = useState<string[]>([]);
-  const fuseRef = useRef<Fuse<string> | null>(null);
-  const loadedForProviderRef = useRef<FileSystemProvider | null>(null);
-  const loadingRef = useRef(false);
-  const invalidateCounterRef = useRef(0);
+  const [trackedProvider, setTrackedProvider] = useState<FileSystemProvider | null>(fsProvider);
+  const [version, setVersion] = useState(0);
 
-  const buildIndex = useCallback((list: string[]) => {
-    fuseRef.current = new Fuse(list, {
+  // Adjust state during render when the provider changes — the React-recommended
+  // pattern for resetting derived state without an effect.
+  if (fsProvider !== trackedProvider) {
+    setTrackedProvider(fsProvider);
+    setFiles([]);
+  }
+
+  useEffect(() => {
+    if (!fsProvider) return;
+    let cancelled = false;
+    void walkVault(fsProvider).then((list) => {
+      if (!cancelled) setFiles(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fsProvider, version]);
+
+  const fuse = useMemo(() => {
+    if (files.length === 0) return null;
+    return new Fuse(files, {
       includeScore: false,
       threshold: 0.4,
       ignoreLocation: true,
       keys: [
-        // Use a single synthetic key: the path string itself. Fuse accepts a
-        // `getFn` but passing a plain array with an empty keys array doesn't
-        // search; so we provide a single identity key.
-        { name: "path", getFn: (s) => s },
+        // Single identity key: the path string itself.
+        { name: "path", getFn: (s: string) => s },
       ],
     });
-  }, []);
-
-  const reload = useCallback(
-    async (provider: FileSystemProvider) => {
-      if (loadingRef.current) return;
-      loadingRef.current = true;
-      try {
-        const list = await walkVault(provider);
-        setFiles(list);
-        buildIndex(list);
-        loadedForProviderRef.current = provider;
-      } finally {
-        loadingRef.current = false;
-      }
-    },
-    [buildIndex],
-  );
-
-  // Lazy-load the list the first time the hook observes an fsProvider.
-  // Intentionally avoids eager work on mount when no vault is available.
-  useEffect(() => {
-    if (!fsProvider) {
-      setFiles([]);
-      fuseRef.current = null;
-      loadedForProviderRef.current = null;
-      return;
-    }
-    if (loadedForProviderRef.current === fsProvider) return;
-    void reload(fsProvider);
-    // invalidateCounterRef is used as a trigger via a ref; changing it from
-    // invalidate() triggers this effect through a state nudge in `invalidate`.
-  }, [fsProvider, reload]);
+  }, [files]);
 
   const invalidate = useCallback(() => {
-    invalidateCounterRef.current += 1;
-    const provider = loadedForProviderRef.current;
-    if (!provider) return;
-    // Force a fresh walk by clearing the cache sentinel and reloading.
-    loadedForProviderRef.current = null;
-    void reload(provider);
-  }, [reload]);
+    setVersion((v) => v + 1);
+  }, []);
 
   const search = useCallback(
     (query: string): string[] => {
       const q = (query ?? "").trim();
       if (!q) return files.slice(0, MAX_RESULTS);
-      const fuse = fuseRef.current;
       if (!fuse) return [];
       return fuse.search(q, { limit: MAX_RESULTS }).map((r) => r.item);
     },
-    [files],
+    [files, fuse],
   );
 
   return { files, search, invalidate };
