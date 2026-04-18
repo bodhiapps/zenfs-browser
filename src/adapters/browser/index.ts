@@ -13,3 +13,4 @@ export {
   VAULT_MOUNT,
 } from "./zenfs-provider";
 export { ZenFsProvider } from "./zenfs-fs-provider";
+export { DexieChatStore } from "./dexie-chat-store";

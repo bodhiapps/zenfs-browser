@@ -9,6 +9,7 @@ import {
   mountVault,
   unmountVault,
   ZenFsProvider,
+  DexieChatStore,
 } from "@/adapters/browser";
 import {
   Breadcrumb,
@@ -62,6 +63,8 @@ function AppContent() {
     [],
   );
   const vault = useVaultMount(handle, vaultPorts);
+
+  const chatStore = useMemo(() => new DexieChatStore(), []);
 
   if (restoring) {
     return (
@@ -152,6 +155,7 @@ function AppContent() {
           <ChatColumn
             className="w-[380px] shrink-0 border-l"
             fsProvider={vault.fsProvider}
+            chatStore={chatStore}
           />
         </div>
       </SidebarInset>

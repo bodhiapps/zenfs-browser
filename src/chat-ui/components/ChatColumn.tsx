@@ -8,19 +8,27 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { buildModel, getServerUrlOrThrow } from "@/lib/agent-model";
 import type { FileSystemProvider } from "@/agent-kit/tools/fs-provider";
+import type { ChatStore } from "@/agent-kit/persistence/chat-store";
 import { useAgentSession } from "@/chat-ui/hooks/useAgentSession";
 import { useBodhiModels } from "@/chat-ui/hooks/useBodhiModels";
+import { useChatSessions } from "@/chat-ui/hooks/useChatSessions";
 import ChatMessages from "./ChatMessages";
 import ChatInput from "./ChatInput";
+import ChatSessionList from "./ChatSessionList";
 
 const SENTINEL_API_KEY = "bodhiapp_sentinel_api_key_ignored";
 
 interface ChatColumnProps {
   className?: string;
   fsProvider: FileSystemProvider | null;
+  chatStore?: ChatStore | null;
 }
 
-export default function ChatColumn({ className, fsProvider }: ChatColumnProps) {
+export default function ChatColumn({
+  className,
+  fsProvider,
+  chatStore = null,
+}: ChatColumnProps) {
   const { isOverallReady, isAuthenticated, login, showSetup, client, auth } =
     useBodhi();
 
@@ -66,12 +74,29 @@ export default function ChatColumn({ className, fsProvider }: ChatColumnProps) {
 
   const getApiKey = useCallback(() => SENTINEL_API_KEY, []);
 
+  // Stable ref to agent session's stop() — needed by useChatSessions'
+  // onBeforeSwitch to abort any active stream before hydrating the next
+  // session's transcript.
+  const stopRef = useRef<() => void>(() => {});
+
+  const sessions = useChatSessions({
+    chatStore,
+    rootDirName: fsProvider?.name ?? null,
+    onBeforeSwitch: () => stopRef.current(),
+  });
+
   const session = useAgentSession({
     fsProvider,
     getModel,
     streamFn,
     getApiKey,
+    chatStore,
+    sessionId: sessions.currentSessionId,
   });
+
+  useEffect(() => {
+    stopRef.current = session.stop;
+  }, [session.stop]);
 
   const { error: chatError, clearError: clearChatError, stop } = session;
 
@@ -112,6 +137,21 @@ export default function ChatColumn({ className, fsProvider }: ChatColumnProps) {
     [selectedModel, session],
   );
 
+  const handleNewChat = useCallback(async () => {
+    if (chatStore) {
+      await sessions.newSession();
+    } else {
+      session.clearMessages();
+    }
+  }, [chatStore, sessions, session]);
+
+  const handleDeleteSession = useCallback(
+    async (id: string) => {
+      await sessions.deleteSession(id);
+    },
+    [sessions],
+  );
+
   return (
     <aside
       data-testid="div-chat-column"
@@ -135,6 +175,15 @@ export default function ChatColumn({ className, fsProvider }: ChatColumnProps) {
         </div>
       ) : (
         <>
+          {chatStore && (
+            <ChatSessionList
+              sessions={sessions.sessions}
+              currentSessionId={sessions.currentSessionId}
+              onNew={() => void handleNewChat()}
+              onSwitch={sessions.switchSession}
+              onDelete={(id) => void handleDeleteSession(id)}
+            />
+          )}
           <ChatMessages
             messages={session.messages}
             streamingMessage={session.streamingMessage}
@@ -143,7 +192,7 @@ export default function ChatColumn({ className, fsProvider }: ChatColumnProps) {
           />
           <ChatInput
             onSendMessage={sendWithModelGuard}
-            onClearMessages={session.clearMessages}
+            onClearMessages={() => void handleNewChat()}
             selectedModel={selectedModel}
             setSelectedModel={setSelectedModel}
             models={models}

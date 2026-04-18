@@ -79,3 +79,26 @@ Append-only log. One short section per phase; final audit happens in Phase 6.
   - `registry.ts` is the only file that imports all four tool factories; tools themselves do not import each other.
   - `prompt.ts` unchanged in imports (zero deps).
 - Gates: `npm run build` clean, `npm run lint` clean, `npm run ci:test:e2e` 5/5 passing (~48s).
+
+## Phase 4 — Chat persistence (Dexie + ChatStore interface)
+
+- Module layout confirmed:
+  - `src/agent-kit/persistence/chat-store.ts` — the `ChatStore` interface + `ChatSession` type. Zero framework deps; the only imported symbol from outside the folder is `AgentMessage` from `@mariozechner/pi-agent-core`.
+  - `src/agent-kit/persistence/in-memory-chat-store.ts` — reference `InMemoryChatStore` (two `Map`s mirroring the split-storage shape). Zero-dep; used by CLI/test reuse.
+  - `src/agent-kit/persistence/index.ts` — barrel exports `ChatSession`/`ChatStore` types + `InMemoryChatStore`. Re-exported by `src/agent-kit/index.ts` via `export * from "./persistence"`.
+  - `src/adapters/browser/dexie-chat-store.ts` — `DexieChatStore` is the only file that imports `dexie` and `nanoid`. `chat-ui/**` has no direct dexie imports (enforced by ESLint `no-restricted-imports`).
+- Split-storage schema (Dexie version 1, database name `zenfs-browser`):
+  - `chatSessionMetadata` — primary key `id`, indexes `updatedAt`, `rootDirName`. Row shape: `{id, title, preview, messageCount, rootDirName, createdAt, updatedAt}`.
+  - `chatSessionData` — primary key `id`. Row shape: `{id, messagesJson}` where `messagesJson` is `JSON.stringify(AgentMessage[])`.
+  - All `createSession`/`deleteSession`/`appendMessage` writes run inside a Dexie rw transaction spanning both tables, so list views never observe a session with one table updated and the other stale.
+  - `listSessions` reads only `chatSessionMetadata.orderBy("updatedAt").reverse()` — the 200-char `preview` is computed at append time so the sidebar never parses message JSON.
+- High-water-mark persistence in `useAgentSession`:
+  - `highWaterMarkRef` records `messages.length` right after `chatStore.loadMessages(sessionId)` hydrates the Agent on mount / session switch; `hydratedSessionIdRef` pins the mark to a specific session so a mid-stream switch can't cross-persist.
+  - On `message_end`, `turn_end`, and `agent_end` events, `persistMessageDelta()` snapshots `agent.state.messages`, slices `[highWaterMark..end)`, advances the high-water mark, and appends each new message through a serialised promise chain (`persistLockRef`) so two back-to-back events can't interleave appends.
+  - The session-change effect aborts any active stream (`_agent.abort()`) before it reloads transcripts — prevents the previous session's in-flight `message_end` from landing on the new session.
+- `useChatSessions` owns session selection + localStorage persistence (`${BASE_URL}chat:currentSessionId`). `ChatColumn` wires it to `useAgentSession` via the `sessionId` port and calls `useChatSessions.onBeforeSwitch = () => session.stop()` so a switch-during-stream aborts first.
+- UI surface + testids: `ChatSessionList` renders `btn-chat-session-new`, `btn-chat-session-toggle`, and per-session `btn-chat-session-<id>[data-test-state=active|inactive]` + `btn-chat-session-delete-<id>`. `MessageBubble`'s existing `chat-message-turn-<N>` testid is reused unchanged — persistence is invisible to the UI-level test API.
+- E2E journey `e2e/chat-persistence.spec.ts` (single test, 5 steps): open+login+vault+select → send two turns → record active session testid → reload → assert both turns rendered without any new `/v1/chat/completions` hit (via `page.route`, not `page.evaluate`) → new session via `btn-chat-session-new` → send "fresh" → switch back to the original session → assert prior turns still there. Route interception counts HTTP calls; the restoration assertion is the "no new LLM call" invariant the plan called out.
+- Gates: `npm run build` clean, `npm run lint` clean, `npm run ci:test:e2e` 6/6 passing (~57s).
+- Deviations from plan: the plan suggested driving FSA re-grant through a `btn-sidebar-restore` flow after reload. In practice the mock handle is not structured-cloneable, so `idb-keyval` silently fails on `set(dirHandle)` and the reloaded app lands in `status: "empty"` instead of `prompt`. Chat persistence does not require a vault, so the test does not re-open the directory after reload and still asserts the persistence guarantee cleanly. Real users will still land in `prompt` state via the existing `btn-sidebar-restore` surface (unchanged code path); this is only a test-environment quirk.
+- Iterations caught by tests: the first test draft reused `ChatPage.waitServerReady(...)` after `page.reload()`. That helper unconditionally clicks `btn-setup-bodhi`, which does not exist on an already-configured reload — it timed out at the action-timeout boundary and blew the test deadline before any assertion fired. Fix: after reload, wait directly on `badge-server-status[data-teststate="ready"]` + `section-auth[data-teststate="authenticated"]` + the previously active session row becoming visible. The setup helper is only appropriate on a cold `page.goto("/")`.

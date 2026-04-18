@@ -6,6 +6,12 @@
  * and an error reporter. This hook knows nothing about Bodhi, ZenFS, Dexie,
  * or shadcn — those live in the app, adapters, and UI components respectively.
  *
+ * Persistence (Phase 4): when a `chatStore` + `sessionId` are supplied, the
+ * hook hydrates `agent.state.messages` from the store on mount/session switch
+ * and appends newly produced messages to the store on `message_end`. A
+ * high-water-mark ref tracks the messages-length at hydration time so we
+ * never re-write loaded history.
+ *
  * Streaming updates are coalesced via requestAnimationFrame to avoid DOM
  * thrash under fast token streams (pattern from pi-web-ui's
  * StreamingMessageContainer).
@@ -20,6 +26,7 @@ import type {
 } from "@mariozechner/pi-agent-core";
 import type { Model } from "@mariozechner/pi-ai";
 import type { FileSystemProvider } from "@/agent-kit/tools/fs-provider";
+import type { ChatStore } from "@/agent-kit/persistence/chat-store";
 import { createFsTools } from "@/agent-kit/tools/registry";
 import { buildSystemPrompt } from "@/agent-kit/agent/prompt";
 import { registerBuiltInRenderers } from "@/chat-ui/components/tool-renderers";
@@ -38,6 +45,10 @@ export interface AgentSessionPorts {
   streamFn: StreamFn;
   /** Sentinel API key used by pi-agent-core; app decides. */
   getApiKey: () => string;
+  /** Persistence backend. When null, messages live only in memory. */
+  chatStore?: ChatStore | null;
+  /** Active session id. When null, persistence is disabled for this run. */
+  sessionId?: string | null;
   /** Report errors that can't be surfaced via the chat state (optional). */
   onError?: (message: string) => void;
 }
@@ -137,6 +148,16 @@ export function useAgentSession(
     streaming?: AgentMessage;
   } | null>(null);
 
+  // High-water mark — the messages.length right after hydration. Messages at
+  // indexes >= highWaterMarkRef.current are "new" and need persistence on the
+  // next message_end / turn_end event.
+  const highWaterMarkRef = useRef<number>(0);
+  // Track which sessionId the high-water mark belongs to so we don't cross
+  // the streams between sessions.
+  const hydratedSessionIdRef = useRef<string | null>(null);
+  // Guards concurrent persistMessageDelta runs by serialising appends.
+  const persistLockRef = useRef<Promise<void>>(Promise.resolve());
+
   const flushMessagesUpdate = useCallback(() => {
     rafPendingRef.current = null;
     const pending = pendingRef.current;
@@ -158,6 +179,36 @@ export function useAgentSession(
     [flushMessagesUpdate],
   );
 
+  // Persist any messages beyond the high-water mark. Serialised so that two
+  // back-to-back events can't interleave their appendMessage calls.
+  const persistMessageDelta = useCallback(() => {
+    const p = portsRef.current;
+    const store = p.chatStore;
+    const sid = p.sessionId;
+    if (!store || !sid) return;
+    // If the hydrated session doesn't match the active session id (e.g. a
+    // switch happened mid-turn), skip persistence to avoid writing into the
+    // wrong session. The agent should have been aborted in that path.
+    if (hydratedSessionIdRef.current !== sid) return;
+    const agent = _agent;
+    if (!agent) return;
+    // Snapshot the new messages now; the append is async.
+    const snapshot = [...agent.state.messages];
+    const from = highWaterMarkRef.current;
+    if (snapshot.length <= from) return;
+    const toAppend = snapshot.slice(from);
+    highWaterMarkRef.current = snapshot.length;
+    persistLockRef.current = persistLockRef.current.then(async () => {
+      for (const msg of toAppend) {
+        try {
+          await store.appendMessage(sid, msg);
+        } catch (err) {
+          console.error("Failed to persist chat message:", err);
+        }
+      }
+    });
+  }, []);
+
   useEffect(() => {
     const agent = getOrCreateAgent(ports.streamFn, ports.getApiKey);
 
@@ -175,9 +226,11 @@ export function useAgentSession(
           break;
         case "message_end":
           scheduleMessagesUpdate([...agent.state.messages], undefined);
+          persistMessageDelta();
           break;
         case "turn_end":
           scheduleMessagesUpdate([...agent.state.messages], undefined);
+          persistMessageDelta();
           break;
         case "agent_end":
           // Flush any pending rAF before final dispatch.
@@ -191,6 +244,8 @@ export function useAgentSession(
             messages: [...agent.state.messages],
             errorMessage: agent.state.errorMessage ?? null,
           });
+          // Final sweep — covers any remaining unpersisted messages.
+          persistMessageDelta();
           break;
       }
     });
@@ -206,6 +261,49 @@ export function useAgentSession(
     // Only re-subscribe if the transport fns change identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Hydrate agent transcript from the chat store whenever the active sessionId changes.
+  useEffect(() => {
+    const p = portsRef.current;
+    const store = p.chatStore;
+    const sid = ports.sessionId ?? null;
+    // Abort any streaming before switching transcripts.
+    _agent?.abort();
+    if (!store || !sid) {
+      // No persistence — reset to in-memory empty.
+      if (_agent) _agent.state.messages = [];
+      highWaterMarkRef.current = 0;
+      hydratedSessionIdRef.current = null;
+      dispatch({ type: "reset" });
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const loaded = await store.loadMessages(sid);
+        if (cancelled) return;
+        const agent = getOrCreateAgent(p.streamFn, p.getApiKey);
+        agent.state.messages = loaded;
+        highWaterMarkRef.current = loaded.length;
+        hydratedSessionIdRef.current = sid;
+        dispatch({
+          type: "messages_update",
+          messages: [...loaded],
+          streaming: undefined,
+        });
+        dispatch({
+          type: "agent_end",
+          messages: [...loaded],
+          errorMessage: null,
+        });
+      } catch (err) {
+        console.error("Failed to load chat session:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ports.sessionId]);
 
   const sendMessage = useCallback(async (prompt: string) => {
     const p = portsRef.current;
@@ -237,6 +335,8 @@ export function useAgentSession(
   const clearMessages = useCallback(() => {
     _agent?.abort();
     if (_agent) _agent.state.messages = [];
+    highWaterMarkRef.current = 0;
+    hydratedSessionIdRef.current = null;
     dispatch({ type: "reset" });
   }, []);
 
