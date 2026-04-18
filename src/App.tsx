@@ -1,9 +1,15 @@
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { BodhiProvider } from "@bodhiapp/bodhi-js-react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { FileViewer } from "@/components/FileViewer";
 import AuthBar from "@/chat-ui/components/AuthBar";
 import ChatColumn from "@/chat-ui/components/ChatColumn";
+import { useVaultMount } from "@/chat-ui/hooks/useVaultMount";
+import {
+  mountVault,
+  unmountVault,
+  ZenFsProvider,
+} from "@/adapters/browser";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -46,6 +52,16 @@ function AppContent() {
     selectFile,
     saveFile,
   } = useFileTree(handle);
+
+  const vaultPorts = useMemo(
+    () => ({
+      mount: mountVault,
+      unmount: unmountVault,
+      createProvider: (h: FileSystemDirectoryHandle) => new ZenFsProvider(h.name),
+    }),
+    [],
+  );
+  const vault = useVaultMount(handle, vaultPorts);
 
   if (restoring) {
     return (
@@ -108,7 +124,20 @@ function AppContent() {
               </Breadcrumb>
             </>
           )}
-          <div className="ml-auto">
+          <span
+            data-testid="span-vault-status"
+            data-test-state={vault.status}
+            className="ml-auto text-xs text-muted-foreground"
+          >
+            {vault.status === "ready"
+              ? "Vault mounted"
+              : vault.status === "mounting"
+                ? "Mounting vault\u2026"
+                : vault.status === "error"
+                  ? "Vault error"
+                  : ""}
+          </span>
+          <div>
             <AuthBar />
           </div>
         </header>

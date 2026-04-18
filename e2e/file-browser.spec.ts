@@ -27,6 +27,14 @@ test.describe("File browser journey", () => {
       await expect(browser.dirName).toHaveText("test-project");
     });
 
+    await test.step("Vault mounts via ZenFS and status flips to ready", async () => {
+      await expect(
+        page.locator(
+          '[data-testid="span-vault-status"][data-test-state="ready"]',
+        ),
+      ).toBeVisible({ timeout: 10_000 });
+    });
+
     await test.step("Root directory entries are visible", async () => {
       await expect(browser.treeNode("src")).toBeVisible();
       await expect(browser.treeNode("docs")).toBeVisible();

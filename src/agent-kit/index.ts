@@ -8,4 +8,4 @@
 //
 // See ./README.md for how this kit is designed to be reused (CLI, backend).
 
-export {};
+export * from "./tools";

@@ -6,4 +6,10 @@
 //   - Must NOT be imported from chat-ui (the app wires adapters into chat-ui
 //     via props/ports, not via direct imports).
 
-export {};
+export {
+  mountVault,
+  unmountVault,
+  isVaultMounted,
+  VAULT_MOUNT,
+} from "./zenfs-provider";
+export { ZenFsProvider } from "./zenfs-fs-provider";
