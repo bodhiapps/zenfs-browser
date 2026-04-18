@@ -3,7 +3,7 @@ import { defineConfig } from "@playwright/test";
 
 const isCI = !!process.env.CI;
 const isHeadless = process.env.HEADLESS === "true" || isCI;
-const baseURL = "http://localhost:5173";
+const baseURL = "http://localhost:5173/zenfs-browser/";
 
 function buildUserAgent(): string {
   const platform = os.platform();

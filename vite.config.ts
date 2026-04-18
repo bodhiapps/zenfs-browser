@@ -6,6 +6,7 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: "/zenfs-browser/",
   plugins: [
     react(),
     babel({ presets: [reactCompilerPreset()] }),
@@ -15,5 +16,8 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+  },
+  server: {
+    strictPort: true,
   },
 })
