@@ -9,9 +9,32 @@ import { fetchBodhiModels, type BodhiModelInfo } from "@/lib/bodhi-models";
 import type { ApiFormat } from "@bodhiapp/bodhi-js-react/api";
 
 const SENTINEL_API_KEY = "bodhiapp_sentinel_api_key_ignored";
+const MODEL_STORAGE_KEY = `${import.meta.env.BASE_URL}chat:selectedModel`;
 
 const EMPTY_MESSAGES: AgentMessage[] = [];
 const EMPTY_MODELS: BodhiModelInfo[] = [];
+
+function loadPersistedModel(): { id: string; apiFormat: ApiFormat } | null {
+  try {
+    const raw = localStorage.getItem(MODEL_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (typeof parsed?.id === "string" && typeof parsed?.apiFormat === "string") {
+      return { id: parsed.id, apiFormat: parsed.apiFormat };
+    }
+  } catch {
+    // ignore malformed entries
+  }
+  return null;
+}
+
+function persistModel(id: string, apiFormat: ApiFormat): void {
+  try {
+    localStorage.setItem(MODEL_STORAGE_KEY, JSON.stringify({ id, apiFormat }));
+  } catch {
+    // ignore quota / private-mode errors
+  }
+}
 
 let _agent: Agent | null = null;
 let _agentUnsub: (() => void) | null = null;
@@ -47,8 +70,12 @@ export function useAgent() {
   const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState<BodhiModelInfo[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
-  const [selectedModel, setSelectedModelState] = useState<string>("");
-  const [selectedApiFormat, setSelectedApiFormat] = useState<ApiFormat>("openai");
+  const [selectedModel, setSelectedModelState] = useState<string>(
+    () => loadPersistedModel()?.id ?? "",
+  );
+  const [selectedApiFormat, setSelectedApiFormat] = useState<ApiFormat>(
+    () => loadPersistedModel()?.apiFormat ?? "openai",
+  );
 
   const authTokenRef = useRef<string | null>(auth.accessToken);
   const isLoadingModelsRef = useRef(false);
@@ -106,7 +133,8 @@ export function useAgent() {
     try {
       const list = await fetchBodhiModels(client);
       setModels(list);
-      if (list.length > 0 && !selectedModel) {
+      const persistedExists = selectedModel && list.some((m) => m.id === selectedModel);
+      if (list.length > 0 && !persistedExists) {
         setSelectedModelState(list[0].id);
         setSelectedApiFormat(list[0].apiFormat);
       }
@@ -134,6 +162,7 @@ export function useAgent() {
   const setSelectedModel = useCallback((id: string, fmt: ApiFormat) => {
     setSelectedModelState(id);
     setSelectedApiFormat(fmt);
+    persistModel(id, fmt);
   }, []);
 
   const sendMessage = useCallback(
