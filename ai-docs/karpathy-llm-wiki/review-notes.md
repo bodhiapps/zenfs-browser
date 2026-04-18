@@ -29,3 +29,30 @@ Append-only log. One short section per phase; final audit happens in Phase 6.
 - Dependencies added: `@zenfs/core@~2.5.6`, `@zenfs/dom@~1.2.9`. Bundle grew by ~290 KB (index chunk).
 - Gates: `npm run build` clean, `npm run lint` clean, `npm run ci:test:e2e` 3/3 passing (~27s).
 - React 19 lint notes: `react-hooks/refs` and `react-hooks/set-state-in-effect` required `useReducer` + ref-update-in-effect patterns. Adopted for `useVaultMount`; same pattern will apply to `useAgentSession` in Phase 2.
+
+## Phase 2 — fs__read tool + tool bubbles + agent wiring
+
+- New in `agent-kit`:
+  - `tools/read.ts` — `fs__read` ported from karpathy with offset/limit/2000-line cap.
+  - `tools/registry.ts` — `createFsTools(fs): FsTool[]` (uses `AgentTool<any>` to sidestep generic variance per karpathy's precedent).
+  - `agent/prompt.ts` — `buildSystemPrompt({rootDirName})` canonical system prompt (covers fs__read + rules).
+- New in `chat-ui`:
+  - `contracts/ui-session.ts` — `ChatUiState` + `ChatUiActions` (UI-agnostic; enables CLI reuse later).
+  - `hooks/useAgentSession.ts` — ports-based agent session hook; replaces retired `src/hooks/useAgent.ts`. Uses `useReducer` + rAF-batched streaming updates (pi-web-ui pattern).
+  - `hooks/useBodhiModels.ts` — model listing + selection (extracted from old useAgent).
+  - `components/tool-renderers/` — registry + Default + FsRead renderers. `registerBuiltInRenderers()` called once at module load.
+  - `components/ToolCallMessage.tsx` — assistant toolCall part renderer with `div-tool-call-<name>[data-test-state=...]`.
+  - `components/ToolResultMessage.tsx` — role:"toolResult" message renderer; reads `toolName/toolCallId/isError` from the top level of the message (pi-ai `ToolResultMessage` shape).
+- `ChatMessages.tsx` no longer filters toolResult; branch-renders. `ChatColumn.tsx` now constructs the streamFn and port set and passes them into `useAgentSession`; model selection moved to `useBodhiModels`.
+- Retired `src/hooks/useAgent.ts` entirely.
+- New e2e: `e2e/agent-fs.spec.ts` — one journey, 6 steps, multiple assertions. Uses only UI-level driving + `data-testid`/`data-test-state` waits. No `page.evaluate` for feature driving. Asserts `fs__read` tool-call bubble → success tool-result bubble → content contains seeded README → assistant reply references it.
+- New data-testids: `div-tool-call-${toolName}`, `div-tool-result-${toolName}` (with `data-test-state=pending|executing|complete` / `success|error`), `div-tool-result-content`.
+- Gates: `npm run build` clean, `npm run lint` clean, `npm run ci:test:e2e` 4/4 passing (~34s).
+- Architectural notes:
+  - `agent-kit` imports verified: only `@mariozechner/pi-agent-core`, `@mariozechner/pi-ai`, `@sinclair/typebox`.
+  - `chat-ui` does not import from `adapters/`; `ChatColumn` receives the `fsProvider` as a prop from `App.tsx`.
+  - Bodhi-specific transport (`streamFn`) is constructed in `ChatColumn` (chat-ui) and passed into `useAgentSession` — the kit-style hook never imports Bodhi SDK.
+- Iterations caught by tests:
+  - TypeBox peer dep: `@sinclair/typebox@0.34.49` matched pi-ai's version; added as direct dep.
+  - `Model` type lives in `@mariozechner/pi-ai`, not `@mariozechner/pi-agent-core`.
+  - `toolResult` message shape: top-level `toolName` and `toolCallId`, not a content-part — flagged by the first failed run where bubble rendered as `div-tool-result-unknown`.

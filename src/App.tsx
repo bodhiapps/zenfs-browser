@@ -149,7 +149,10 @@ function AppContent() {
             saveState={saveState}
             onSave={saveFile}
           />
-          <ChatColumn className="w-[380px] shrink-0 border-l" />
+          <ChatColumn
+            className="w-[380px] shrink-0 border-l"
+            fsProvider={vault.fsProvider}
+          />
         </div>
       </SidebarInset>
     </SidebarProvider>

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import MessageBubble from "./MessageBubble";
+import ToolCallMessage from "./ToolCallMessage";
+import ToolResultMessage from "./ToolResultMessage";
 import { extractTextFromAgentMessage, type AgentMessage } from "@/types/chat";
 
 interface ChatMessagesProps {
@@ -8,6 +10,24 @@ interface ChatMessagesProps {
   streamingMessage?: AgentMessage;
   isStreaming: boolean;
   error?: string | null;
+}
+
+function hasToolCalls(msg: AgentMessage): boolean {
+  if (!Array.isArray(msg.content)) return false;
+  return msg.content.some(
+    (p) =>
+      p &&
+      typeof p === "object" &&
+      "type" in p &&
+      (p as { type: unknown }).type === "toolCall",
+  );
+}
+
+function toolResultCallId(msg: AgentMessage): string | null {
+  // role:"toolResult" messages carry toolCallId at the top level.
+  const any = msg as unknown as Record<string, unknown>;
+  const id = any.toolCallId;
+  return typeof id === "string" ? id : null;
 }
 
 export default function ChatMessages({
@@ -24,6 +44,18 @@ export default function ChatMessages({
   const renderList = useMemo<AgentMessage[]>(() => {
     return streamingMessage ? [...messages, streamingMessage] : messages;
   }, [messages, streamingMessage]);
+
+  const completedCallIds = useMemo<Set<string>>(() => {
+    const s = new Set<string>();
+    for (const msg of renderList) {
+      if (msg.role === "toolResult") {
+        const id = toolResultCallId(msg);
+        if (id) s.add(id);
+      }
+    }
+    return s;
+  }, [renderList]);
+
 
   useEffect(() => {
     const viewport = scrollViewportRef.current;
@@ -42,7 +74,8 @@ export default function ChatMessages({
   useEffect(() => {
     const lastMessage = renderList[renderList.length - 1];
     const isNewUserMessage =
-      renderList.length > prevMessagesLengthRef.current && lastMessage?.role === "user";
+      renderList.length > prevMessagesLengthRef.current &&
+      lastMessage?.role === "user";
 
     if (isNewUserMessage) {
       isUserScrolledUpRef.current = false;
@@ -72,7 +105,9 @@ export default function ChatMessages({
   const lastMsg = renderList[renderList.length - 1];
   const showPending =
     isStreaming &&
-    (!lastMsg || lastMsg.role !== "assistant" || !extractTextFromAgentMessage(lastMsg));
+    (!lastMsg ||
+      lastMsg.role !== "assistant" ||
+      (!extractTextFromAgentMessage(lastMsg) && !hasToolCalls(lastMsg)));
 
   return (
     <ScrollArea
@@ -98,12 +133,29 @@ export default function ChatMessages({
         ) : (
           <>
             {renderList.map((msg, index) => {
-              if (msg.role === "toolResult") return null;
+              if (msg.role === "toolResult") {
+                return <ToolResultMessage key={index} message={msg} />;
+              }
               const turn = turnByIndex[index];
-              return <MessageBubble key={index} message={msg} turn={turn} />;
+              const text = extractTextFromAgentMessage(msg);
+              return (
+                <div key={index}>
+                  {text && <MessageBubble message={msg} turn={turn} />}
+                  {msg.role === "assistant" && hasToolCalls(msg) && (
+                    <ToolCallMessage
+                      message={msg}
+                      completedCallIds={completedCallIds}
+                      isStreaming={isStreaming}
+                    />
+                  )}
+                </div>
+              );
             })}
             {showPending && (
-              <div data-testid="streaming-indicator" className="flex justify-start mb-4">
+              <div
+                data-testid="streaming-indicator"
+                className="flex justify-start mb-4"
+              >
                 <div className="bg-muted px-3 py-2 rounded-lg">
                   <div className="flex items-center gap-1.5">
                     <div className="w-2 h-2 bg-muted-foreground/60 rounded-full animate-pulse" />

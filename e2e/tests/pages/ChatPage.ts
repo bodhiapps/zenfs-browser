@@ -101,4 +101,22 @@ export class ChatPage {
   async getAssistantText(turn: number): Promise<string> {
     return (await this.page.locator(this.selectors.message(turn, "assistant")).textContent()) ?? "";
   }
+
+  // --- Tool-call / tool-result helpers (Phase 2+) ---
+
+  toolCallBubble(toolName: string, state?: "pending" | "executing" | "complete") {
+    const base = `[data-testid="div-tool-call-${toolName}"]`;
+    return this.page.locator(state ? `${base}[data-test-state="${state}"]` : base);
+  }
+
+  toolResultBubble(toolName: string, state?: "success" | "error") {
+    const base = `[data-testid="div-tool-result-${toolName}"]`;
+    return this.page.locator(state ? `${base}[data-test-state="${state}"]` : base);
+  }
+
+  toolResultContent(toolName: string) {
+    return this.page
+      .locator(`[data-testid="div-tool-result-${toolName}"]`)
+      .locator('[data-testid="div-tool-result-content"]');
+  }
 }

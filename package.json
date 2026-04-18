@@ -24,6 +24,7 @@
     "@milkdown/kit": "^7.20.0",
     "@milkdown/react": "^7.20.0",
     "@radix-ui/react-popover": "^1.1.15",
+    "@sinclair/typebox": "^0.34.49",
     "@tabler/icons-react": "^3.41.1",
     "@tailwindcss/vite": "^4.2.2",
     "@zenfs/core": "~2.5.6",
